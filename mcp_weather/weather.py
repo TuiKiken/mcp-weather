@@ -54,6 +54,7 @@ async def get_hourly_weather(location: str) -> Dict:
     
     # Try to get location key from cache first
     location_key = get_cached_location_key(location)
+    location_info = None
     
     async with ClientSession() as session:
         if not location_key:
@@ -70,8 +71,32 @@ async def get_hourly_weather(location: str) -> Dict:
                     raise Exception("Location not found")
             
             location_key = locations[0]["Key"]
+            location_info = locations[0]
             # Cache the location key for future use
             cache_location_key(location, location_key)
+        else:
+            # If we have the location key from cache, we need to fetch location info
+            location_url = f"{base_url}/locations/v1/{location_key}"
+            params = {
+                "apikey": api_key,
+            }
+            async with session.get(location_url, params=params) as response:
+                if response.status == 200:
+                    location_info = await response.json()
+                else:
+                    # If we can't get location info, fetch it through search
+                    location_search_url = f"{base_url}/locations/v1/cities/search"
+                    params = {
+                        "apikey": api_key,
+                        "q": location,
+                    }
+                    async with session.get(location_search_url, params=params) as search_response:
+                        locations = await search_response.json()
+                        if search_response.status == 200 and locations and len(locations) > 0:
+                            location_info = locations[0]
+        
+        if not location_info:
+            raise Exception("Could not retrieve location information")
         
         # Get current conditions
         current_conditions_url = f"{base_url}/currentconditions/v1/{location_key}"
@@ -122,9 +147,9 @@ async def get_hourly_weather(location: str) -> Dict:
             current_data = "No current conditions available"
         
         return {
-            "location": locations[0]["LocalizedName"],
+            "location": location_info["LocalizedName"],
             "location_key": location_key,
-            "country": locations[0]["Country"]["LocalizedName"],
+            "country": location_info["Country"]["LocalizedName"],
             "current_conditions": current_data,
             "hourly_forecast": hourly_data
-        } 
+        }
